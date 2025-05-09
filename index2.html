@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nine Men's Morris</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: sans-serif;
+        }
+        svg {
+            border: 1px solid black;
+        }
+        .player-info {
+            margin-top: 20px;
+            font-size: 1.2em;
+        }
+        button {
+            margin-top: 10px;
+            padding: 10px 20px;
+            font-size: 1em;
+            cursor: pointer;
+        }
+        .message {
+            margin-top: 20px;
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+        .mode-selection {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Nine Men's Morris</h1>
+    <div class="mode-selection">
+        Select Mode:
+        <button id="pvp-mode">Player vs Player</button>
+        <button id="pvc-mode">Player vs Computer</button>
+    </div>
+    <div class="player-info">
+        Current Turn: <span id="current-player">Player 1</span>
+    </div>
+    <div class="player-info">
+        Player 1 Score: <span id="player1-score">0</span> | Player 2 Score: <span id="player2-score">0</span>
+    </div>
+    <svg id="game-board" width="600" height="600" viewBox="0 0 600 600"></svg>
+    <button id="reset-button">Reset Game</button>
+    <div id="game-message" class="message"></div>
+
+    <script>
+        const svg = document.getElementById('game-board');
+        const currentPlayerSpan = document.getElementById('current-player');
+        const player1ScoreSpan = document.getElementById('player1-score');
+        const player2ScoreSpan = document.getElementById('player2-score');
+        const resetButton = document.getElementById('reset-button');
+        const gameMessageDiv = document.getElementById('game-message');
+        const pvpModeButton = document.getElementById('pvp-mode');
+        const pvcModeButton = document.getElementById('pvc-mode');
+
+        const boardSize = 600;
+        const padding = 50;
+        const innerPadding = 100;
+        const pieceRadius = 15;
+
+        const boardPoints = [
+            { x: padding, y: padding }, { x: boardSize / 2, y: padding }, { x: boardSize - padding, y: padding },
+            { x: padding + innerPadding, y: padding + innerPadding }, { x: boardSize / 2, y: padding + innerPadding }, { x: boardSize - padding - innerPadding, y: padding + innerPadding },
+            { x: padding + innerPadding * 2, y: padding + innerPadding * 2 }, { x: boardSize / 2, y: padding + innerPadding * 2 }, { x: boardSize - padding - innerPadding * 2, y: padding + innerPadding * 2 },
+            { x: padding, y: boardSize / 2 }, { x: padding + innerPadding, y: boardSize / 2 }, { x: padding + innerPadding * 2, y: boardSize / 2 },
+            { x: boardSize - padding, y: boardSize / 2 }, { x: boardSize - padding - innerPadding, y: boardSize / 2 }, { x: boardSize - padding - innerPadding * 2, y: boardSize / 2 },
+            { x: padding, y: boardSize - padding }, { x: boardSize / 2, y: boardSize - padding }, { x: boardSize - padding, y: boardSize - padding },
+            { x: padding + innerPadding, y: boardSize - padding - innerPadding }, { x: boardSize / 2, y: boardSize - padding - innerPadding }, { x: boardSize - padding - innerPadding, y: boardSize - padding - innerPadding },
+            { x: padding + innerPadding * 2, y: boardSize - padding - innerPadding * 2 }, { x: boardSize / 2, y: boardSize - padding - innerPadding * 2 }, { x: boardSize - padding - innerPadding * 2, y: boardSize - padding - innerPadding * 2 }
+        ];
+
+        const boardConnections = [
+            [0, 1], [1, 2], [3, 4], [4, 5], [6, 7], [7, 8],
+            [9, 10], [10, 11], [12, 13], [13, 14], [15, 16], [16, 17],
+            [18, 19], [19, 20], [21, 22], [22, 23],
+            [0, 9], [9, 15], [1, 4], [4, 7], [7, 19], [19, 22],
+            [2, 12], [12, 17], [5, 13], [13, 20], [8, 14], [14, 23],
+            [3, 10], [10, 18], [6, 11], [11, 21]
+        ];
+
+        const millCombinations = [
+            [0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11], [12, 13, 14], [15, 16, 17], [18, 19, 20], [21, 22, 23],
+            [0, 9, 15], [3, 10, 18], [6, 11, 21], [1, 4, 7], [16, 19, 22], [15, 18, 21], [2, 12, 17], [5, 13, 20], [8, 14, 23],
+            [0, 3, 6], [15, 18, 21], [1, 4, 7], [16, 19, 22], [2, 5, 8], [17, 20, 23], [9, 10, 11], [12, 13, 14]
+        ];
+
+        let boardState = Array(24).fill(null); // null, 'player1', 'player2'
+        let player1Pieces = 9;
+        let player2Pieces = 9;
+        let currentPlayer = 'player1';
+        let phase = 'placing'; // 'placing', 'moving', 'removing'
+        let selectedPiece = null;
+        let player1Score = 0;
+        let player2Score = 0;
+        let gameEnded = false;
+        let gameMode = 'pvp'; // 'pvp' or 'pvc'
+
+        function drawBoard() {
+            // Clear previous board elements
+            while (svg.firstChild) {
+                svg.removeChild(svg.firstChild);
+            }
+
+            // Draw lines
+            boardConnections.forEach(connection => {
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', boardPoints[connection[0]].x);
+                line.setAttribute('y1', boardPoints[connection[0]].y);
+                line.setAttribute('x2', boardPoints[connection[1]].x);
+                line.setAttribute('y2', boardPoints[connection[1]].y);
+                line.setAttribute('stroke', 'black');
+                line.setAttribute('stroke-width', 2);
+                svg.appendChild(line);
+            });
+
+            // Draw points (clickable areas)
+            boardPoints.forEach((point, index) => {
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', point.x);
+                circle.setAttribute('cy', point.y);
+                circle.setAttribute('r', pieceRadius + 5); // Make clickable area slightly larger
+                circle.setAttribute('fill', 'transparent');
+                circle.setAttribute('data-index', index);
+                circle.classList.add('board-point');
+                circle.addEventListener('click', handleBoardClick);
+                svg.appendChild(circle);
+            });
+        }
+
+        function updateBoard() {
+            // Remove existing pieces
+            svg.querySelectorAll('.piece').forEach(piece => piece.remove());
+
+            // Draw pieces based on boardState
+            boardState.forEach((state, index) => {
+                if (state) {
+                    const piece = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    piece.setAttribute('cx', boardPoints[index].x);
+                    piece.setAttribute('cy', boardPoints[index].y);
+                    piece.setAttribute('r', pieceRadius);
+                    piece.setAttribute('fill', state === 'player1' ? 'blue' : 'red');
+                    piece.setAttribute('data-index', index);
+                    piece.classList.add('piece', state);
+                    if (gameMode === 'pvp' || (gameMode === 'pvc' && currentPlayer === 'player1')) {
+                         if (phase === 'moving' && state === currentPlayer) {
+                            piece.style.cursor = 'pointer';
+                            piece.addEventListener('click', handlePieceClick);
+                        }
+                    }
+                    svg.appendChild(piece);
+                }
+            });
+        }
+
+        function handleBoardClick(event) {
+            if (gameEnded) return;
+            if (gameMode === 'pvc' && currentPlayer === 'player2') return; // Prevent player from clicking during computer's turn
+
+            const index = parseInt(event.target.getAttribute('data-index'));
+
+            if (phase === 'placing') {
+                if (boardState[index] === null) {
+                    placePiece(index);
+                }
+            } else if (phase === 'moving') {
+                if (selectedPiece !== null) {
+                    movePiece(selectedPiece, index);
+                }
+            } else if (phase === 'removing') {
+                removePiece(index);
+            }
+        }
+
+        function handlePieceClick(event) {
+            if (gameEnded || phase !== 'moving') return;
+            if (gameMode === 'pvc' && currentPlayer === 'player2') return; // Prevent player from clicking during computer's turn
+
+            const index = parseInt(event.target.getAttribute('data-index'));
+
+            if (boardState[index] === currentPlayer) {
+                if (selectedPiece === index) {
+                    // Deselect the piece
+                    selectedPiece = null;
+                    event.target.style.stroke = 'none';
+                } else {
+                    // Select the piece
+                    if (selectedPiece !== null) {
+                        // Deselect previous piece
+                        const prevSelected = svg.querySelector(`.piece[data-index="${selectedPiece}"]`);
+                        if (prevSelected) prevSelected.style.stroke = 'none';
+                    }
+                    selectedPiece = index;
+                    event.target.style.stroke = 'yellow';
+                    event.target.style.strokeWidth = 3;
+                }
+            }
+        }
+
+        function placePiece(index) {
+            boardState[index] = currentPlayer;
+            if (currentPlayer === 'player1') {
+                player1Pieces--;
+            } else {
+                player2Pieces--;
+            }
+            updateBoard();
+
+            if (checkMill(index)) {
+                phase = 'removing';
+                gameMessageDiv.textContent = `${currentPlayer === 'player1' ? 'Player 1' : 'Player 2'} formed a mill! Remove an opponent's piece.`;
+                if (gameMode === 'pvc' && currentPlayer === 'player2') {
+                    setTimeout(computerRemovePiece, 500); // Delay for computer's removal
+                }
+            } else {
+                switchTurn();
+            }
+
+            if (player1Pieces === 0 && player2Pieces === 0) {
+                phase = 'moving';
+                gameMessageDiv.textContent = "All pieces placed. Start moving!";
+            }
+        }
+
+        function movePiece(fromIndex, toIndex) {
+            if (boardState[toIndex] !== null) {
+                gameMessageDiv.textContent = "Cannot move to an occupied spot.";
+                return;
+            }
+
+            // Check if the move is valid (adjacent or flying)
+            const isAdjacent = boardConnections.some(conn =>
+                (conn[0] === fromIndex && conn[1] === toIndex) || (conn[1] === fromIndex && conn[0] === toIndex)
+            );
+
+            const canFly = (currentPlayer === 'player1' && countPiecesOnBoard('player1') <= 3) ||
+                           (currentPlayer === 'player2' && countPiecesOnBoard('player2') <= 3);
+
+            if (isAdjacent || canFly) {
+                boardState[toIndex] = boardState[fromIndex];
+                boardState[fromIndex] = null;
+                selectedPiece = null;
+                updateBoard();
+
+                if (checkMill(toIndex)) {
+                    phase = 'removing';
+                    gameMessageDiv.textContent = `${currentPlayer === 'player1' ? 'Player 1' : 'Player 2'} formed a mill! Remove an opponent's piece.`;
+                    if (gameMode === 'pvc' && currentPlayer === 'player2') {
+                        setTimeout(computerRemovePiece, 500); // Delay for computer's removal
+                    }
+                } else {
+                    switchTurn();
+                }
+            } else {
+                gameMessageDiv.textContent = "Invalid move. Pieces must move to adjacent spots.";
+            }
+        }
+
+        function removePiece(index) {
+            const opponent = currentPlayer === 'player1' ? 'player2' : 'player1';
+
+            if (boardState[index] === opponent) {
+                // Check if the piece is part of a mill (cannot remove a piece in a mill unless all opponent pieces are in mills)
+                const isInMill = checkMill(index, opponent);
+                const allOpponentPiecesInMills = boardState.every((state, i) => {
+                    if (state === opponent) {
+                        return checkMill(i, opponent);
+                    }
+                    return true;
+                });
+
+                if (!isInMill || allOpponentPiecesInMills) {
+                    boardState[index] = null;
+                    if (opponent === 'player1') {
+                        player1Score++;
+                        player1ScoreSpan.textContent = player1Score;
+                    } else {
+                        player2Score++;
+                        player2ScoreSpan.textContent = player2Score;
+                    }
+                    updateBoard();
+                    checkWinCondition();
+                    if (!gameEnded) {
+                        phase = player1Pieces === 0 && player2Pieces === 0 ? 'moving' : 'placing';
+                        switchTurn();
+                    }
+                } else {
+                    gameMessageDiv.textContent = "Cannot remove a piece that is part of a mill, unless all opponent pieces are in mills.";
+                }
+            } else {
+                gameMessageDiv.textContent = "You must remove an opponent's piece.";
+            }
+        }
+
+        function checkMill(index, player = currentPlayer) {
+            return millCombinations.some(combination => {
+                if (combination.includes(index)) {
+                    return combination.every(i => boardState[i] === player);
+                }
+                return false;
+            });
+        }
+
+        function countPiecesOnBoard(player) {
+            return boardState.filter(state => state === player).length;
+        }
+
+        function checkWinCondition() {
+            const player1PiecesOnBoard = countPiecesOnBoard('player1');
+            const player2PiecesOnBoard = countPiecesOnBoard('player2');
+
+            if (phase === 'moving') {
+                if (player1PiecesOnBoard < 3) {
+                    endGame('Player 2');
+                } else if (player2PiecesOnBoard < 3) {
+                    endGame('Player 1');
+                }
+            }
+
+            // Check for blocked moves (only applicable in moving phase)
+            if (phase === 'moving') {
+                const currentPlayerPieces = boardState.map((state, index) => state === currentPlayer ? index : null).filter(index => index !== null);
+                let canMove = false;
+                for (const pieceIndex of currentPlayerPieces) {
+                    const adjacentPoints = boardConnections
+                        .filter(conn => conn.includes(pieceIndex))
+                        .map(conn => conn[0] === pieceIndex ? conn[1] : conn[0]);
+
+                    if (adjacentPoints.some(adjIndex => boardState[adjIndex] === null)) {
+                        canMove = true;
+                        break;
+                    }
+                }
+                if (!canMove) {
+                    endGame(currentPlayer === 'player1' ? 'Player 2' : 'Player 1', 'blocked');
+                }
+            }
+        }
+
+        function endGame(winner, reason = 'pieces') {
+            gameEnded = true;
+            gameMessageDiv.textContent = `${winner} wins! (${reason === 'pieces' ? 'Opponent has fewer than 3 pieces' : 'Opponent is blocked'})`;
+            // Disable further interaction
+            svg.querySelectorAll('.board-point').forEach(point => point.removeEventListener('click', handleBoardClick));
+            svg.querySelectorAll('.piece').forEach(piece => piece.removeEventListener('click', handlePieceClick));
+        }
+
+        function switchTurn() {
+            if (gameEnded) return;
+
+            currentPlayer = currentPlayer === 'player1' ? 'player2' : 'player1';
+            currentPlayerSpan.textContent = currentPlayer === 'player1' ? 'Player 1' : 'Player 2';
+            gameMessageDiv.textContent = ''; // Clear previous messages
+
+            // Re-attach click listeners for the new current player's pieces
+            svg.querySelectorAll('.piece').forEach(piece => {
+                piece.removeEventListener('click', handlePieceClick);
+                if (gameMode === 'pvp' || (gameMode === 'pvc' && currentPlayer === 'player1')) {
+                    if (piece.classList.contains(currentPlayer)) {
+                        piece.style.cursor = 'pointer';
+                        piece.addEventListener('click', handlePieceClick);
+                    } else {
+                        piece.style.cursor = 'default';
+                    }
+                } else {
+                     piece.style.cursor = 'default';
+                }
+            });
+
+            checkWinCondition(); // Check for win condition after switching turns (e.g., blocked opponent)
+
+            if (gameMode === 'pvc' && currentPlayer === 'player2' && !gameEnded) {
+                setTimeout(computerTurn, 1000); // Delay for computer's turn
+            }
+        }
+
+        function resetGame() {
+            boardState = Array(24).fill(null);
+            player1Pieces = 9;
+            player2Pieces = 9;
+            currentPlayer = 'player1';
+            phase = 'placing';
+            selectedPiece = null;
+            player1Score = 0;
+            player2Score = 0;
+            gameEnded = false;
+
+            currentPlayerSpan.textContent = 'Player 1';
+            player1ScoreSpan.textContent = '0';
+            player2ScoreSpan.textContent = '0';
+            gameMessageDiv.textContent = '';
+
+            // Re-attach board point listeners
+            svg.querySelectorAll('.board-point').forEach(point => {
+                point.removeEventListener('click', handleBoardClick);
+                point.addEventListener('click', handleBoardClick);
+            });
+
+            updateBoard();
+        }
+
+        // Computer AI (Simple Random Moves)
+        function computerTurn() {
+            if (gameEnded) return;
+
+            if (phase === 'placing') {
+                computerPlacePiece();
+            } else if (phase === 'moving') {
+                computerMovePiece();
+            } else if (phase === 'removing') {
+                computerRemovePiece();
+            }
+        }
+
+        function computerPlacePiece() {
+            const emptySpots = boardState.map((state, index) => state === null ? index : null).filter(index => index !== null);
+            if (emptySpots.length > 0) {
+                const randomIndex = emptySpots[Math.floor(Math.random() * emptySpots.length)];
+                placePiece(randomIndex);
+            }
+        }
+
+        function computerMovePiece() {
+            const computerPieces = boardState.map((state, index) => state === 'player2' ? index : null).filter(index => index !== null);
+            const canFly = countPiecesOnBoard('player2') <= 3;
+
+            // Try to form a mill
+            for (const pieceIndex of computerPieces) {
+                const possibleMoves = canFly ?
+                    boardState.map((state, index) => state === null ? index : null).filter(index => index !== null) :
+                    boardConnections
+                        .filter(conn => conn.includes(pieceIndex))
+                        .map(conn => conn[0] === pieceIndex ? conn[1] : conn[0])
+                        .filter(adjIndex => boardState[adjIndex] === null);
+
+                for (const moveIndex of possibleMoves) {
+                    // Simulate the move
+                    const tempBoardState = [...boardState];
+                    tempBoardState[moveIndex] = 'player2';
+                    tempBoardState[pieceIndex] = null;
+
+                    if (checkMill(moveIndex, 'player2', tempBoardState)) {
+                        movePiece(pieceIndex, moveIndex);
+                        return;
+                    }
+                }
+            }
+
+            // If no mill can be formed, make a random valid move
+            const validMoves = [];
+            for (const pieceIndex of computerPieces) {
+                 const possibleMoves = canFly ?
+                    boardState.map((state, index) => state === null ? index : null).filter(index => index !== null) :
+                    boardConnections
+                        .filter(conn => conn.includes(pieceIndex))
+                        .map(conn => conn[0] === pieceIndex ? conn[1] : conn[0])
+                        .filter(adjIndex => boardState[adjIndex] === null);
+                possibleMoves.forEach(moveIndex => validMoves.push({ from: pieceIndex, to: moveIndex }));
+            }
+
+            if (validMoves.length > 0) {
+                const randomMove = validMoves[Math.floor(Math.random() * validMoves.length)];
+                movePiece(randomMove.from, randomMove.to);
+            } else {
+                 // If no valid moves, the computer is blocked (should be caught by checkWinCondition)
+                 console.log("Computer is blocked.");
+            }
+        }
+
+        function computerRemovePiece() {
+            const player1Pieces = boardState.map((state, index) => state === 'player1' ? index : null).filter(index => index !== null);
+            const removablePieces = player1Pieces.filter(index => {
+                const isInMill = checkMill(index, 'player1');
+                const allOpponentPiecesInMills = boardState.every((state, i) => {
+                    if (state === 'player1') {
+                        return checkMill(i, 'player1');
+                    }
+                    return true;
+                });
+                return !isInMill || allOpponentPiecesInMills;
+            });
+
+            if (removablePieces.length > 0) {
+                const randomIndex = removablePieces[Math.floor(Math.random() * removablePieces.length)];
+                removePiece(randomIndex);
+            } else {
+                 // Should not happen if a mill was formed, but as a fallback
+                 console.log("Computer couldn't find a piece to remove.");
+                 phase = player1Pieces === 0 && player2Pieces === 0 ? 'moving' : 'placing';
+                 switchTurn();
+            }
+        }
+
+         // Helper function for computer AI to check mill on a temporary board state
+        function checkMill(index, player, tempBoardState) {
+            return millCombinations.some(combination => {
+                if (combination.includes(index)) {
+                    return combination.every(i => tempBoardState[i] === player);
+                }
+                return false;
+            });
+        }
+
+
+        // Backup and Restore (Simple localStorage implementation)
+        function saveGame() {
+            const gameState = {
+                boardState: boardState,
+                player1Pieces: player1Pieces,
+                player2Pieces: player2Pieces,
+                currentPlayer: currentPlayer,
+                phase: phase,
+                player1Score: player1Score,
+                player2Score: player2Score,
+                gameEnded: gameEnded,
+                gameMode: gameMode
+            };
+            localStorage.setItem('nineMensMorrisGame', JSON.stringify(gameState));
+            console.log("Game saved.");
+        }
+
+        function loadGame() {
+            const savedState = localStorage.getItem('nineMensMorrisGame');
+            if (savedState) {
+                const gameState = JSON.parse(savedState);
+                boardState = gameState.boardState;
+                player1Pieces = gameState.player1Pieces;
+                player2Pieces = gameState.player2Pieces;
+                currentPlayer = gameState.currentPlayer;
+                phase = gameState.phase;
+                player1Score = gameState.player1Score;
+                player2Score = gameState.player2Score;
+                gameEnded = gameState.gameEnded;
+                gameMode = gameState.gameMode || 'pvp'; // Default to pvp if mode not saved
+
+                currentPlayerSpan.textContent = currentPlayer === 'player1' ? 'Player 1' : 'Player 2';
+                player1ScoreSpan.textContent = player1Score;
+                player2ScoreSpan.textContent = player2Score;
+                gameMessageDiv.textContent = gameEnded ? `${currentPlayer === 'player1' ? 'Player 2' : 'Player 1'} won the last game.` : '';
+
+                updateBoard();
+                if (gameEnded) {
+                     svg.querySelectorAll('.board-point').forEach(point => point.removeEventListener('click', handleBoardClick));
+                     svg.querySelectorAll('.piece').forEach(piece => piece.removeEventListener('click', handlePieceClick));
+                } else {
+                     svg.querySelectorAll('.board-point').forEach(point => {
+                        point.removeEventListener('click', handleBoardClick);
+                        point.addEventListener('click', handleBoardClick);
+                    });
+                }
+
+                // If loaded game is PVC and it's computer's turn, start computer turn
+                if (gameMode === 'pvc' && currentPlayer === 'player2' && !gameEnded) {
+                    setTimeout(computerTurn, 1000);
+                }
+
+                console.log("Game loaded.");
+            } else {
+                console.log("No saved game found.");
+            }
+        }
+
+        function setGameMode(mode) {
+            gameMode = mode;
+            resetGame(); // Reset game when mode changes
+            if (gameMode === 'pvc') {
+                player2ScoreSpan.previousSibling.textContent = 'Computer Score: ';
+            } else {
+                 player2ScoreSpan.previousSibling.textContent = 'Player 2 Score: ';
+            }
+        }
+
+
+        // Initial setup
+        drawBoard();
+        updateBoard();
+        resetButton.addEventListener('click', resetGame);
+        pvpModeButton.addEventListener('click', () => setGameMode('pvp'));
+        pvcModeButton.addEventListener('click', () => setGameMode('pvc'));
+
+
+        // Add save/load buttons
+        const saveButton = document.createElement('button');
+        saveButton.textContent = 'Save Game';
+        saveButton.addEventListener('click', saveGame);
+        document.body.insertBefore(saveButton, resetButton);
+
+        const loadButton = document.createElement('button');
+        loadButton.textContent = 'Load Game';
+        loadButton.addEventListener('click', loadGame);
+        document.body.insertBefore(loadButton, resetButton);
+
+        // Load game on startup if available
+        loadGame();
+
+    </script>
+</body>
+</html>
